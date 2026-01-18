@@ -37,8 +37,8 @@
           ]
         );
 
-        bearColconAlias = pkgs.writeShellScriptBin "bcb" "bear -- colcon build --symlink-install --base-paths .ros_packages/src --build-base .ros_packages/build --install-base .ros_packages/install --log-base .ros_packages/log --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
-        colconAlias = pkgs.writeShellScriptBin "cb" "colcon build --symlink-install --base-paths .ros_packages/src --build-base .ros_packages/build --install-base .ros_packages/install --log-base .ros_packages/log --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
+        bearColconAlias = pkgs.writeShellScriptBin "bcb" "bear -- colcon --log-base .ros_ws/log build --symlink-install --base-paths .ros_ws/src --build-base .ros_ws/build --install-base .ros_ws/install";
+        colconAlias = pkgs.writeShellScriptBin "cb" "colcon --log-base .ros_ws/log build --symlink-install --base-paths .ros_ws/src --build-base .ros_ws/build --install-base .ros_ws/install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
 
         pyrightConfigGen = pkgs.writeShellScriptBin "generate-pyright-config" ''
                     echo "Generating pyrightconfig.json..."
@@ -47,7 +47,7 @@
 
           paths = []
           # Local install
-          paths.extend(os.path.abspath(p) for p in glob.glob(".ros_packages/install/**/site-packages", recursive=True))
+          paths.extend(os.path.abspath(p) for p in glob.glob(".ros_ws/install/**/site-packages", recursive=True))
           # Venv
           paths.extend(os.path.abspath(p) for p in glob.glob(".venv/**/site-packages", recursive=True))
           # PYTHONPATH
@@ -65,6 +65,51 @@
           print(json.dumps(config, indent=2))
           ' > pyrightconfig.json
         '';
+
+        clangdConfigGen = pkgs.writeShellScriptBin "generate-clangd-config" ''
+          echo "Generating .clangd..."
+
+          # Start .clangd file
+          cat <<EOF > .clangd
+          CompileFlags:
+            Add:
+              - "-std=c++17"
+              - "-idirafter"
+              - "${pkgs.lib.getDev pkgs.glibc}/include"
+              - "-isystem"
+              - "${pkgs.lib.getDev pkgs.libcxx}/include/c++/v1"
+              - "-isystem"
+              - "${pkgs.lib.getDev pkgs.libcxx}/include"
+          EOF
+
+          add_paths() {
+            local env_var_name=$1
+            local env_value=$(eval echo \$$env_var_name)
+            
+            IFS=':' read -ra PATHS <<< "$env_value"
+            for path in "''${PATHS[@]}"; do
+              if [ -n "$path" ] && [ -d "$path" ]; then
+                echo "    - \"-isystem\"" >> .clangd
+                echo "    - \"$path\"" >> .clangd
+              fi
+            done
+          }
+
+          add_paths CPLUS_INCLUDE_PATH
+          add_paths CPATH
+          add_paths CMAKE_INCLUDE_PATH
+
+          echo "    - \"-isystem\"" >> .clangd
+          echo "    - \"$(${pkgs.clang}/bin/clang -print-resource-dir)/include\"" >> .clangd
+        '';
+
+        updateRepos = pkgs.writeShellScriptBin "update-repos" ''
+          if [ -f repos.repos ]; then
+            vcs import .ros_ws/src < repos.repos
+          else
+            echo "repos.repos not found in the current directory."
+          fi
+        '';
       in
       {
         devShells.default = pkgs.mkShell {
@@ -76,17 +121,18 @@
 
             export PYTHONPATH="${pythonWithRos}/${pythonWithRos.sitePackages}:$PYTHONPATH"
 
-            # Setup workspace structure
-            mkdir -p .ros_packages/src
-
-            # Link current project
+            mkdir -p .ros_ws/src
             PROJECT_NAME=$(basename "$PWD")
-            # Force update the symlink to point to current directory
-            ln -sfn "$PWD" ".ros_packages/src/$PROJECT_NAME"
+            ln -sfn "$PWD" ".ros_ws/src/$PROJECT_NAME"
 
             # Generate pyright config if it doesn't exist or is empty
             if [ ! -s pyrightconfig.json ]; then
               generate-pyright-config
+            fi
+
+            # Generate clangd config if it doesn't exist or is empty
+            if [ ! -s .clangd ]; then
+              generate-clangd-config
             fi
 
             if [ ! -d ".venv" ]; then
@@ -105,14 +151,18 @@
             pkgs.colcon
             pkgs.vcstool
             pkgs.eigen
+            pkgs.tinyxml-2
             pkgs.clang
             pkgs.clang-tools
             pkgs.libcxx
             pkgs.gcc
             pkgs.bear
+
             bearColconAlias
             colconAlias
             pyrightConfigGen
+            clangdConfigGen
+            updateRepos
 
             (pkgs.rosPackages.humble.buildEnv { paths = myRosPackages; })
           ];
