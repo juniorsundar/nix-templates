@@ -37,8 +37,8 @@
           ]
         );
 
-        bearColconAlias = pkgs.writeShellScriptBin "bcb" "bear -- colcon build";
-        colconAlias = pkgs.writeShellScriptBin "cb" "colcon build --symlink-install --build-base build --install-base install --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
+        bearColconAlias = pkgs.writeShellScriptBin "bcb" "bear -- colcon build --symlink-install --base-paths .ros_packages/src --build-base .ros_packages/build --install-base .ros_packages/install --log-base .ros_packages/log --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
+        colconAlias = pkgs.writeShellScriptBin "cb" "colcon build --symlink-install --base-paths .ros_packages/src --build-base .ros_packages/build --install-base .ros_packages/install --log-base .ros_packages/log --cmake-args -DCMAKE_EXPORT_COMPILE_COMMANDS=ON";
 
         pyrightConfigGen = pkgs.writeShellScriptBin "generate-pyright-config" ''
                     echo "Generating pyrightconfig.json..."
@@ -47,7 +47,7 @@
 
           paths = []
           # Local install
-          paths.extend(os.path.abspath(p) for p in glob.glob("install/**/site-packages", recursive=True))
+          paths.extend(os.path.abspath(p) for p in glob.glob(".ros_packages/install/**/site-packages", recursive=True))
           # Venv
           paths.extend(os.path.abspath(p) for p in glob.glob(".venv/**/site-packages", recursive=True))
           # PYTHONPATH
@@ -76,6 +76,14 @@
 
             export PYTHONPATH="${pythonWithRos}/${pythonWithRos.sitePackages}:$PYTHONPATH"
 
+            # Setup workspace structure
+            mkdir -p .ros_packages/src
+
+            # Link current project
+            PROJECT_NAME=$(basename "$PWD")
+            # Force update the symlink to point to current directory
+            ln -sfn "$PWD" ".ros_packages/src/$PROJECT_NAME"
+
             # Generate pyright config if it doesn't exist or is empty
             if [ ! -s pyrightconfig.json ]; then
               generate-pyright-config
@@ -95,6 +103,7 @@
             pythonWithRos
 
             pkgs.colcon
+            pkgs.vcstool
             pkgs.eigen
             pkgs.clang
             pkgs.clang-tools
