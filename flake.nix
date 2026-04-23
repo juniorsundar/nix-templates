@@ -14,6 +14,15 @@
         description = "ROS Humble development environment";
       };
 
+      rust-basic = {
+        path = ./rust/rust-basic;
+        description = "Basic Rust development environment";
+      };
+
+      rust-python-javascript = {
+        path = ./rust/rust-python-javascript;
+        description = "Compound Rust, Python, JavaScript development environment";
+      };
     };
 
     # Optional: Set a default template
